@@ -1,0 +1,89 @@
+{
+  "version": "3.2",
+  "log": [
+    {
+      "UnstructuredStorage": {
+        "src": "contracts\\unstructured-storage.sol:3",
+        "version": {
+          "withMetadata": "307185497be7ed96f5d7ecd85a999a73e7c06da4f3b8541c1fd95663d411e1b4",
+          "withoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff",
+          "linkedWithoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff"
+        },
+        "inherit": [],
+        "libraries": [],
+        "methods": [],
+        "linkReferences": [],
+        "errors": [],
+        "layout": {
+          "storage": [],
+          "types": {},
+          "layoutVersion": "1.1",
+          "flat": false
+        }
+      }
+    },
+    {
+      "UnstructuredStorage": {
+        "src": "contracts\\unstructured-storage.sol:3",
+        "version": {
+          "withMetadata": "307185497be7ed96f5d7ecd85a999a73e7c06da4f3b8541c1fd95663d411e1b4",
+          "withoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff",
+          "linkedWithoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff"
+        },
+        "inherit": [],
+        "libraries": [],
+        "methods": [],
+        "linkReferences": [],
+        "errors": [],
+        "layout": {
+          "storage": [],
+          "types": {},
+          "layoutVersion": "1.1",
+          "flat": false
+        }
+      }
+    },
+    {
+      "UnstructuredStorage": {
+        "src": "contracts\\unstructured-storage.sol:3",
+        "version": {
+          "withMetadata": "307185497be7ed96f5d7ecd85a999a73e7c06da4f3b8541c1fd95663d411e1b4",
+          "withoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff",
+          "linkedWithoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff"
+        },
+        "inherit": [],
+        "libraries": [],
+        "methods": [],
+        "linkReferences": [],
+        "errors": [],
+        "layout": {
+          "storage": [],
+          "types": {},
+          "layoutVersion": "1.1",
+          "flat": false
+        }
+      }
+    },
+    {
+      "UnstructuredStorage": {
+        "src": "contracts\\unstructured-storage.sol:1",
+        "version": {
+          "withMetadata": "4bb7fbae72957e447ec7713d49c63d536541d73fa3dfed6bc03c662842fbf4b2",
+          "withoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff",
+          "linkedWithoutMetadata": "08d24783a787f8a51dea0c166bb6f91a4f0865e02d03d749f102d332e6ead0ff"
+        },
+        "inherit": [],
+        "libraries": [],
+        "methods": [],
+        "linkReferences": [],
+        "errors": [],
+        "layout": {
+          "storage": [],
+          "types": {},
+          "layoutVersion": "1.1",
+          "flat": false
+        }
+      }
+    }
+  ]
+}

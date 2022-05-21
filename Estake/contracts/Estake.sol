@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.0;
+pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./esAvax.sol";
-
-contract Estake is IEstake, esAvax, Pausable, Ownable{
+//add IEstake
+contract Estake is IEstake, esAvax, Pausable{
 
     using SafeMath for uint256;
 
@@ -20,7 +19,7 @@ contract Estake is IEstake, esAvax, Pausable, Ownable{
         return _totalSupply;
     }
 
-    function _getTotalAvaxPooled() public view returns(uint256){
+    function _getTotalAvaxPooled() internal override view returns(uint256){
         //to deploy make this actually run a caculation
         return 1;
     }
