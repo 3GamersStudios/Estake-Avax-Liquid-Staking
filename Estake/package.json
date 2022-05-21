@@ -1,0 +1,30 @@
+{
+  "name": "estake",
+  "version": "0.0.1",
+  "description": "a staking and lending service for the avax blockchain",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3GamersStudios/Estake.git"
+  },
+  "keywords": [
+    "avax",
+    "staking"
+  ],
+  "author": "EstakeDAO",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/3GamersStudios/Estake/issues"
+  },
+  "homepage": "https://github.com/3GamersStudios/Estake#readme",
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.0.6",
+    "@openzeppelin/contracts": "^4.6.0",
+    "@openzeppelin/hardhat-upgrades": "^1.17.0",
+    "ethers": "^5.6.6",
+    "hardhat": "^2.9.6"
+  }
+}
