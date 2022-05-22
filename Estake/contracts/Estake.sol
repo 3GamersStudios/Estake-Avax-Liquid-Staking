@@ -24,7 +24,7 @@ contract Estake is IEstake, esAvax, Pausable{
         return 1;
     }
 
-    function stake() internal whenNotStopped returns (uint256) {
+    function stake() internal whenNotPaused returns (uint256 esAvax) {
         address sender = msg.sender;
         uint256 deposit = msg.value;
 
@@ -35,7 +35,7 @@ contract Estake is IEstake, esAvax, Pausable{
             //this only happens when staker is new as their is no slashing on avax
             sharesToMint = deposit;
         }
-        _mintStakeShares();
+        _mintShares(sender, sharesToMint);
     }
 
     function mint(address to, uint256 amount) public onlyOwner {
