@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "./esAvax.sol";
@@ -11,14 +11,14 @@ import "./unstructured-storage.sol";
 
 //@dev all functions to be inheirited will be marked my a "_"
 //helps with clarity for devs and community
-abstract contract esAvax is IERC20, Pausable {
+abstract contract esAvax is IERC20, PausableUpgradeable {
 
     using SafeMath for uint256;
     using UnstructuredStorage for bytes32;
 
     mapping (address => uint256) private shares;
 
-        mapping (address => mapping (address => uint256)) private allowance;
+        mapping (address => mapping (address => uint256)) private allowances;
 
     bytes32 internal constant TOTAL_AVAX_SHARES = keccak256("estake.esAvax.totalShares");
 
@@ -33,6 +33,10 @@ abstract contract esAvax is IERC20, Pausable {
     //returns shortened name used on cexs and the web
     function symbol() public pure returns (string memory) {
         return "esAvax";
+    }
+
+    function totalSupply() public view override returns (uint256){
+        return _getTotalAvaxPooled();
     }
 
 
@@ -70,23 +74,23 @@ abstract contract esAvax is IERC20, Pausable {
     }
     //underscore is used to differentiate between spender and sender
     function increaseAllowance(address _spender, uint256 addedAmount)public returns (bool) {
-        _approve(msg.sender, _spender, allowance[msg.sender][_spender].add(addedAmount));   
+        _approve(msg.sender, _spender, allowances[msg.sender][_spender].add(addedAmount));   
         return true;     
     }
     //underscore is used to differentiate between spender and sender
     function decreaseAllowance(address _spender, uint256 subtractedAmount) public returns (bool){
-        uint256 currentAllowance = allowance[msg.sender][_spender];
+        uint256 currentAllowance = allowances[msg.sender][_spender];
         require(currentAllowance >= subtractedAmount, "CANNOT DECREASE BELOW ZERO" );
         _approve(msg.sender, _spender, currentAllowance.sub(subtractedAmount));
         return true;
     }
 
-    function getAllowance(address owner, address spender) public view returns (uint256){
-        return allowance[owner][spender];
+    function allowance(address owner, address spender) public view override returns (uint256){
+        return allowances[owner][spender];
     }
 //underscore is used to differientiate sender vs msg.sender
     function transferFrom(address _sender, address reciver, uint256 amount) public override returns (bool){
-        uint256 currentAllowance = allowance[_sender][msg.sender];
+        uint256 currentAllowance = allowances[_sender][msg.sender];
         require(currentAllowance >= amount, "Transfer Amount Exceeds Wallet Ballance");
 
         _transfer(_sender, reciver, amount);
@@ -149,7 +153,7 @@ abstract contract esAvax is IERC20, Pausable {
         require(owner != address(0), "NO APPROVAL FROM ZERO ADDRESS");
         require(spender != address(0), "NO APPROVAL FROM ZERO ADDRESS");
 
-        allowance[owner][spender] = amount;
+        allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }
 
