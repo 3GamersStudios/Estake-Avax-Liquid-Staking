@@ -22,6 +22,7 @@
   "homepage": "https://github.com/3GamersStudios/Estake#readme",
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "npm:hardhat-deploy-ethers@^0.3.0-beta.13",
+    "@nomiclabs/hardhat-etherscan": "^3.0.3",
     "@openzeppelin/contracts": "^4.6.0",
     "@openzeppelin/hardhat-upgrades": "^1.17.0",
     "chai": "^4.3.6",

@@ -1,0 +1,3 @@
+to deploy npx hardhat run --network avaxTest scripts/deploy.js  NOTE CHANGE THE VALUES TO THE CORRECT TIMINGS
+
+to verify npx hardhat verify --network avaxTest contract address

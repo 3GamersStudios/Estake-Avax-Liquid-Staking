@@ -169,7 +169,7 @@
           "type": "uint8"
         }
       ],
-      "stateMutability": "pure",
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -194,6 +194,19 @@
         }
       ],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getCurrStakeAccts",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -307,7 +320,7 @@
           "type": "string"
         }
       ],
-      "stateMutability": "pure",
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -352,7 +365,7 @@
           "type": "string"
         }
       ],
-      "stateMutability": "pure",
+      "stateMutability": "view",
       "type": "function"
     },
     {
