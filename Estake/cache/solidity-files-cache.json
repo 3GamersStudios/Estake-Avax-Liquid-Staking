@@ -226,8 +226,8 @@
       ]
     },
     "D:\\Programming\\Solidity\\Estake\\contracts\\Estake.sol": {
-      "lastModificationDate": 1654924959147,
-      "contentHash": "f32b2b449888f0f1945c0d38eaa6e100",
+      "lastModificationDate": 1655011387515,
+      "contentHash": "dd5c1f3bf168e88eaf16c97c338bc650",
       "sourceName": "contracts/Estake.sol",
       "solcConfig": {
         "version": "0.8.3",

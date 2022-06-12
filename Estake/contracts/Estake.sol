@@ -26,8 +26,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     uint public DebondagePeriod;
     uint public WithdrawWindow;
 
-    mapping(uint => uint) public oldExchangeRateByTime;
-    uint[] public oldExchangeRateByTimes;
     
     mapping(address => withdrawRequest[]) public acctWithdrawRequestArray;
     mapping(address => uint) public acctSharesHeld;
@@ -63,7 +61,7 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
     event Submitted(address indexed sender, uint256 amount);
     event WithdrawRequested(address withdrawAcct, uint256 amountAvax);
-    event Withdrawn(address withdrawee, uint timeRequested, uint sharesAmount, uint amountAvax);
+    event Withdrawn(address withdrawee, uint timeRequested, uint amountAvax);
     event DebondageUpdated(uint oldPeriod, uint newPeriod);
     event WithdrawUpdated(uint oldPeriod, uint newPeriod);
     event UpdatedDeposit(address depositeer, uint256 amountDeposited);
@@ -365,7 +363,7 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         _unpause();
     }
 
-    function retrieveAcctRequestesEnumerated(address acct, uint256 start, uint256 end) external view returns (withdrawRequest[] memory, uint[] memory){
+    function retrieveAcctRequestesEnumerated(address acct, uint256 start, uint256 end) external view returns (withdrawRequest[] memory){
         require(start < acctWithdrawRequestArray[acct].length, "INDEX OUT OF BOUNDS");
         require(start < end, "START MUST BE BEFORE END");
 
@@ -374,20 +372,12 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         }        
 
         withdrawRequest[] memory EnumedToReturn = new withdrawRequest[](end.sub(start));
-        uint[] memory exchangeRates = new uint[](end.sub(start));
 
         for(uint i=0; i < end.sub(start); i++){
             EnumedToReturn[i] = acctWithdrawRequestArray[acct][start.add(i)];
-
-            if(_isWithinClaimWindow(EnumedToReturn[i])){
-                (bool success, uint exchangeRate) = _getExchangeRateByBlockTime(EnumedToReturn[i].requestTime);
-                require( success, "EXCHANGE RATE MISSING"); 
-
-                exchangeRates[i] = exchangeRate;
-            }
         }
 
-        return(EnumedToReturn, exchangeRates);
+        return(EnumedToReturn);
     }
 
     function _getTotalAvaxPooled() internal view returns(uint256){
@@ -461,28 +451,23 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         require(_isWithinClaimWindow(request), "REQUEST NOT IN CLAIM WINDOW");
 
-        (bool success, uint256 exchangeRate) = _getExchangeRateByBlockTime(request.requestTime);
-        require (success, "EXECHANGE RATE IS NULL");
-
         uint256 sharesAmount = request.withdrawAmount;
         uint256 requestTime = request.requestTime;
-        uint256 avaxAmount = exchangeRate.mul(sharesAmount).div(1e18);
-        require(avaxAmount >= sharesAmount, "INVALID RATE");
 
         acctSharesHeld[msg.sender] = acctSharesHeld[msg.sender].sub(sharesAmount);
         _burnShares(address(this), sharesAmount);
 
-        transientAvax.setStorageUint256(transientAvax.getStorageUint256().sub(avaxAmount));
+        transientAvax.setStorageUint256(transientAvax.getStorageUint256().sub(sharesAmount));
         _recaculateAvax();
 
         acctWithdrawRequestArray[msg.sender][withdrawIndex] = acctWithdrawRequestArray[msg.sender][acctWithdrawRequestArray[msg.sender].length.sub(1)];
         acctWithdrawRequestArray[msg.sender].pop();
 
-        (success,) = msg.sender.call{value: avaxAmount}("");
+        (bool success,) = msg.sender.call{value: sharesAmount}("");
         require(success, "AVAX WITHDRAWL FAILED");
 
 
-        emit Withdrawn(msg.sender, requestTime, sharesAmount, avaxAmount);
+        emit Withdrawn(msg.sender, requestTime, sharesAmount);
     }
 
     function _isWithinDebondagePeriod(withdrawRequest memory request) internal view returns (bool){
@@ -497,61 +482,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         return request.requestTime.add(DebondagePeriod).add(WithdrawWindow) < block.timestamp;
     }
 
-    function _getExchangeRateByBlockTime(uint unlockTimestamp) internal view returns (bool, uint){
-        if(oldExchangeRateByTimes.length == 0){
-            return (false, 0);
-        }
-
-        uint low = 0;
-        uint mid;
-        uint high = oldExchangeRateByTimes.length - 1;
-
-        uint unlockWithdrawAt = unlockTimestamp.add(DebondagePeriod);
-
-        while (low <= high){
-            //finds middle for the non-math nerds
-            mid = high.add(low).div(2);
-
-            if(oldExchangeRateByTimes[mid] <= unlockWithdrawAt){
-                if(mid.add(1) == oldExchangeRateByTimes.length || oldExchangeRateByTimes[mid.add(1)] > unlockWithdrawAt){
-                    return(true, oldExchangeRateByTimes[oldExchangeRateByTimes[mid]]);
-                
-                }
-                
-                low = mid.add(1);
-            }
-            else if (mid == 0){
-                return (true, 1e18);
-            }
-            else {
-                high = mid.sub(1);
-            }
-        }
-
-        return (false, 0);
-    }
-    //cycles thru all exchange rates and purges old ones no longer needed
-    function _purgeOutOfDateRates() internal{
-        require(oldExchangeRateByTimes.length != 0,"No Exchange Rates Found");
-
-        uint shiftNum = 0;
-        uint ExpThreshold = block.timestamp.sub(WithdrawWindow);
-
-        while(shiftNum < oldExchangeRateByTimes.length && oldExchangeRateByTimes[shiftNum] < ExpThreshold){
-            shiftNum = shiftNum.add(1);
-
-            require(shiftNum != 0, "Shift is Incorrect Error");
-
-            for(uint i = 0; i < oldExchangeRateByTimes.length.sub(shiftNum); i = i.add(1)){
-                oldExchangeRateByTimes[i] = oldExchangeRateByTimes[i.add(shiftNum)];
-
-            }
-
-            for(uint i = 1; i <= shiftNum; i = i.add(1)){
-                oldExchangeRateByTimes.pop();
-            }
-        }
-    }
 
     function _submitted(address sender, uint256 amount) internal {
         transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amount));
@@ -600,10 +530,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amount));
         _recaculateAvax();
-
-        _purgeOutOfDateRates();
-        oldExchangeRateByTime[block.timestamp] = getPooledAvaxfromShares(1e18);
-        oldExchangeRateByTimes.push(block.timestamp);
 
     }
 
