@@ -21,9 +21,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         //wallets staked
     uint256 stakeAccts;
 
-    bytes32 internal constant TOTAL_AVAX_SHARES =
-        keccak256("estake.esAvax.totalShares");
-
     uint256 private _totalSupply;
 
     uint public DebondagePeriod;
@@ -40,6 +37,15 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         uint withdrawAmount;
     }
+    
+    struct outstandingReceipt{
+        uint withdrawlTime;
+
+        uint amountOwed;
+    }
+
+    //array of outstanding withdrawl receipts-mapped to addresses incase delegator wallet changes
+    mapping(address => outstandingReceipt[]) public outstandingWithdrawlReciepts;
 
 
     bytes32 constant public AdminRole = keccak256("DEFAULT_ADMIN");
@@ -49,7 +55,11 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     bytes32 constant public PauseRole = keccak256("PAUSE_ROLE");
     bytes32 constant public ResumeRole = keccak256("RESUME_ROLE");
 
+    bytes32 internal constant TOTAL_AVAX_SHARES = keccak256("estake.esAvax.totalShares");
     bytes32 internal constant transientAvax = keccak256("TRANSIENT_AVAX");
+    bytes32 internal constant delegatedAvax = keccak256("DELEGATED_AVAX");
+    bytes32 internal constant totalControledAvax = keccak256("CONTROLLED_AVAX");
+    bytes32 internal constant avaxLockedForWithdrawl = keccak256("AVAILABLE_AVAX_WITHDRAWL");
 
     event Submitted(address indexed sender, uint256 amount);
     event WithdrawRequested(address withdrawAcct, uint256 amountAvax);
@@ -249,10 +259,14 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     {
         require(mintTo != address(0), "NO MINT TO THE ZERO ADDRESS");
 
+        if(shares[mintTo] == 0){
+            stakeAccts = stakeAccts.add(1);
+        }
         newTotalShares = getTotalShares().add(amount);
         TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
 
         shares[mintTo] = shares[mintTo].add(newTotalShares);
+
 
         //as esAvax is rebasable so there is no implicit transfer event
         //these conditions could result in a infinite amount of events
@@ -274,6 +288,10 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
 
         shares[burnFrom] = addressShares.sub(amount);
+
+        if(shares[burnFrom] == 0){
+            stakeAccts = stakeAccts.sub(1);
+        }
         return burnSuccessful = true;
     }
 
@@ -406,6 +424,8 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         acctWithdrawRequestArray[msg.sender].push(withdrawRequest(block.timestamp, amountShares));
 
+        avaxLockedForWithdrawl.setStorageUint256(avaxLockedForWithdrawl.getStorageUint256().add(amountShares));
+
         emit WithdrawRequested(msg.sender, getPooledAvaxfromShares(amountShares));
     }
 
@@ -427,6 +447,8 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         acctSharesHeld[msg.sender] = acctSharesHeld[msg.sender].sub(sharesAmount);
         _transferShares(address(this), msg.sender, sharesAmount);
+
+        avaxLockedForWithdrawl.setStorageUint256(avaxLockedForWithdrawl.getStorageUint256().sub(sharesAmount));
 
         emit WithdrawRequestCancelled(msg.sender, withdrawRequestedAt, sharesAmount);
 
@@ -451,6 +473,7 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         _burnShares(address(this), sharesAmount);
 
         transientAvax.setStorageUint256(transientAvax.getStorageUint256().sub(avaxAmount));
+        _recaculateAvax();
 
         acctWithdrawRequestArray[msg.sender][withdrawIndex] = acctWithdrawRequestArray[msg.sender][acctWithdrawRequestArray[msg.sender].length.sub(1)];
         acctWithdrawRequestArray[msg.sender].pop();
@@ -507,11 +530,39 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         return (false, 0);
     }
+    //cycles thru all exchange rates and purges old ones no longer needed
+    function _purgeOutOfDateRates() internal{
+        require(oldExchangeRateByTimes.length != 0,"No Exchange Rates Found");
+
+        uint shiftNum = 0;
+        uint ExpThreshold = block.timestamp.sub(WithdrawWindow);
+
+        while(shiftNum < oldExchangeRateByTimes.length && oldExchangeRateByTimes[shiftNum] < ExpThreshold){
+            shiftNum = shiftNum.add(1);
+
+            require(shiftNum != 0, "Shift is Incorrect Error");
+
+            for(uint i = 0; i < oldExchangeRateByTimes.length.sub(shiftNum); i = i.add(1)){
+                oldExchangeRateByTimes[i] = oldExchangeRateByTimes[i.add(shiftNum)];
+
+            }
+
+            for(uint i = 1; i <= shiftNum; i = i.add(1)){
+                oldExchangeRateByTimes.pop();
+            }
+        }
+    }
 
     function _submitted(address sender, uint256 amount) internal {
-        transientAvax.setStorageUint256(amount);
+        transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amount));
+        _recaculateAvax();
+        
 
         emit Submitted(sender, amount);
+    }
+
+    function _recaculateAvax() internal {
+        totalControledAvax.setStorageUint256(delegatedAvax.getStorageUint256().add(transientAvax.getStorageUint256()));
     }
 
     function _emitTransferAfterMint(address receiver, uint256 amount) internal{
@@ -534,6 +585,10 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     function withdrawForDelegation(uint256 avaxAmount) external nonReentrant{
         require(hasRole(WithdrawRole, msg.sender), "ADDRESS IS WRONG MY FRIEND");
 
+        outstandingWithdrawlReciepts[msg.sender].push(outstandingReceipt(block.timestamp, avaxAmount));
+        delegatedAvax.setStorageUint256(delegatedAvax.getStorageUint256().add(avaxAmount));
+        transientAvax.setStorageUint256(transientAvax.getStorageUint256().sub(avaxAmount));
+
         (bool success,) = msg.sender.call{value: avaxAmount}("");
         require(success, "AVAX TRANSFER FAILED");
 
@@ -544,13 +599,30 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         require(hasRole(RewardsRole, msg.sender),"NEED A WALLET TO REBASE BRO");
 
         transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amount));
+        _recaculateAvax();
+
+        _purgeOutOfDateRates();
+        oldExchangeRateByTime[block.timestamp] = getPooledAvaxfromShares(1e18);
+        oldExchangeRateByTimes.push(block.timestamp);
+
     }
 
+    function getAvailableAvaxtoDelegate() external view returns (uint sharesAvailable){
+        require(hasRole(DepositRole, msg.sender), "MISSNG REQUIRED ROLE");
+        sharesAvailable = transientAvax.getStorageUint256().sub(avaxLockedForWithdrawl.getStorageUint256());
+    }
 
     //deposit Avax from staking without shares
-    function depositInterest() external payable{
+    function depositToCloseReciepts(uint256 receiptIndex) external payable{
         require(hasRole(DepositRole, msg.sender), "MAYBE TMRW??");
         require(msg.value > 0, "NO VALUE");
+        require(msg.value == outstandingWithdrawlReciepts[msg.sender][receiptIndex].amountOwed, "VALUE DOES NOT EQUAL AMOUNT OWED");
+
+        outstandingWithdrawlReciepts[msg.sender][receiptIndex] = outstandingWithdrawlReciepts[msg.sender][outstandingWithdrawlReciepts[msg.sender].length.sub(1)];
+        outstandingWithdrawlReciepts[msg.sender].pop();
+
+        delegatedAvax.setStorageUint256(delegatedAvax.getStorageUint256().sub(msg.value));
+        transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(msg.value));
 
         emit UpdatedDeposit(msg.sender, msg.value);
     }
