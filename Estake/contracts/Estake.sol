@@ -61,13 +61,14 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     bytes32 internal constant totalControledAvax = keccak256("CONTROLLED_AVAX");
     bytes32 internal constant avaxLockedForWithdrawl = keccak256("AVAILABLE_AVAX_WITHDRAWL");
 
-    event Submitted(address indexed sender, uint256 amount);
+    event Submitted(address indexed sender, uint256 amountShares, uint256 amountAvax);
     event WithdrawRequested(address withdrawAcct, uint256 amountAvax);
     event Withdrawn(address withdrawee, uint timeRequested, uint sharesAmount, uint amountAvax);
     event DebondageUpdated(uint oldPeriod, uint newPeriod);
     event WithdrawUpdated(uint oldPeriod, uint newPeriod);
     event UpdatedDeposit(address depositeer, uint256 amountDeposited);
     event DelegationWithdrawl(address delegator, uint256 amount);
+    event OverdueSharesWithdrawn(address withdrawee, uint256 sharesWithdrawn);
     event WithdrawRequestCancelled(address cancellor, uint timeRequested, uint SharesCancelled);
 
     function initialize( uint _withdrawWindow, uint _debondageWindow) public initializer {
@@ -111,8 +112,106 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         return _stake();
     }
 
-    function withdraw( uint256 amountShares) external {
-        return RequestWithdrawl(amountShares);
+    function withdraw(uint256 withdrawlIndex) external nonReentrant{
+        _withdrawStake(withdrawlIndex);
+    }
+
+    function requestWithdraw( uint256 amountShares) external {
+        return _requestWithdrawl(amountShares);
+    }
+
+    function cancelWithdrawRequest(uint256 withdrawlIndex) external nonReentrant{
+        _cancelWithdrawRequest(withdrawlIndex);
+    }
+
+    function cancelDebondingRequests() external nonReentrant{
+        uint256 withdrawlIndex;
+
+        while(withdrawlIndex < acctWithdrawRequestArray[msg.sender].length){
+            if(!_isWithinDebondagePeriod(acctWithdrawRequestArray[msg.sender][withdrawlIndex])){
+                withdrawlIndex = withdrawlIndex.add(1);
+                continue;
+            }
+
+                _cancelWithdrawRequest(withdrawlIndex);
+        }
+    }
+
+    function cancelRequestsInWithdrawlWindow() external nonReentrant{
+        uint256 index;
+
+        while(index < acctWithdrawRequestArray[msg.sender].length){
+            if(!_isWithinClaimWindow(acctWithdrawRequestArray[msg.sender][index])){
+                index = index.add(1);
+                continue;
+            }
+
+            _cancelWithdrawRequest(index);
+        }
+    }
+
+    function cancelAndReceiveOverdueShares(uint requestIndex) external nonReentrant whenNotPaused {
+        require(requestIndex < acctWithdrawRequestArray[msg.sender].length, "INDEX OUT OF RANGE");
+
+        withdrawRequest memory request = acctWithdrawRequestArray[msg.sender][requestIndex];
+
+        require(_isExpiredRequest(request), "REQUEST IS NOT EXPIRED YET");
+
+        uint256 sharesToReturn = request.withdrawAmount;
+        acctSharesHeld[msg.sender] = acctSharesHeld[msg.sender].sub(sharesToReturn);
+        acctWithdrawRequestArray[msg.sender][requestIndex] = acctWithdrawRequestArray[msg.sender][acctWithdrawRequestArray[msg.sender].length -1];
+        acctWithdrawRequestArray[msg.sender].pop();
+
+        _transferShares(address(this), msg.sender, sharesToReturn);
+
+        emit OverdueSharesWithdrawn(msg.sender, sharesToReturn);
+    }
+
+    function cancelAndReceiveOverdueShares() external nonReentrant whenNotPaused{
+        uint256 sharesToReturn = 0;
+
+        uint requestsToReturn = acctWithdrawRequestArray[msg.sender].length;
+        uint num = 0;
+
+        while(num < requestsToReturn){
+            withdrawRequest memory request = acctWithdrawRequestArray[msg.sender][num];
+
+            if(!_isExpiredRequest(request)){
+                num = num.add(1);
+                continue;
+            }
+
+            sharesToReturn = sharesToReturn.add(request.withdrawAmount);
+
+            acctWithdrawRequestArray[msg.sender][num] = acctWithdrawRequestArray[msg.sender][acctWithdrawRequestArray[msg.sender].length -1];
+            acctWithdrawRequestArray[msg.sender].pop();
+
+            requestsToReturn = requestsToReturn.sub(1);
+        }
+
+        if(sharesToReturn > 0){
+            acctSharesHeld[msg.sender] = acctSharesHeld[msg.sender].sub(sharesToReturn);
+            _transferShares(address(this), msg.sender, sharesToReturn);
+
+            emit OverdueSharesWithdrawn(msg.sender, sharesToReturn);
+        }
+    }
+
+    function withdraw() external nonReentrant whenNotPaused{
+            uint256 withdrawlRequests = acctWithdrawRequestArray[msg.sender].length;
+
+            uint256 num = 0;
+
+            while(num  < withdrawlRequests){
+                if(!_isWithinClaimWindow(acctWithdrawRequestArray[msg.sender][num])){
+                    num = num.add(1);
+                    continue;
+                }
+
+                _withdrawStake(num);
+
+                withdrawlRequests = withdrawlRequests.sub(1);
+            }
     }
 
     function getSupply() public view returns (uint256){
@@ -149,6 +248,10 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
     function balanceOf(address account) public view override returns (uint256) {
         return getPooledAvaxfromShares(_sharesOf(account));
+    }
+
+    function getWithdrawlRequestCountByAcct(address acct) external view returns (uint256) {
+        return acctWithdrawRequestArray[acct].length;
     }
 
     function transfer(address reciver, uint256 amount)
@@ -224,6 +327,8 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         return true;
     }
 
+    //Information Functions
+
     function getSharesFromStakedAvax(uint256 _amountAvax)
         public
         view
@@ -250,120 +355,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         }
     }
 
-    //mints new shares and adds them to the wallet adress without a transfer event
-    //contract cannot be paused/address to mintTo cannot be the zero address
-    function _mintShares(address mintTo, uint256 amount)
-        internal
-        whenNotPaused
-        returns (uint256 newTotalShares)
-    {
-        require(mintTo != address(0), "NO MINT TO THE ZERO ADDRESS");
-
-        if(shares[mintTo] == 0){
-            stakeAccts = stakeAccts.add(1);
-        }
-        newTotalShares = getTotalShares().add(amount);
-        TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
-
-        shares[mintTo] = shares[mintTo].add(newTotalShares);
-
-
-        //as esAvax is rebasable so there is no implicit transfer event
-        //these conditions could result in a infinite amount of events
-    }
-
-    //only used when dealing with exploits/withdrawls
-    //tokens will be minted to the victims address
-    //and then burned from the perpatrators address
-    function _burnShares(address burnFrom, uint256 amount)
-        internal
-        returns (bool burnSuccessful)
-    {
-        require(burnFrom != address(0), "Will NO BURN  THE ZERO ADDRESS");
-
-        uint256 addressShares = shares[burnFrom];
-        require(amount <= addressShares, "BURN MORE THAN WALLET HOLDS");
-
-        uint256 newTotalShares = _getTotalShares().sub(amount);
-        TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
-
-        shares[burnFrom] = addressShares.sub(amount);
-
-        if(shares[burnFrom] == 0){
-            stakeAccts = stakeAccts.sub(1);
-        }
-        return burnSuccessful = true;
-    }
-
-    function _approve(
-        address owner,
-        address spender,
-        uint256 amount
-    ) internal override whenNotPaused {
-        require(owner != address(0), "NO APPROVAL FROM ZERO ADDRESS");
-        require(spender != address(0), "NO APPROVAL FROM ZERO ADDRESS");
-
-        allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
-    }
-
-    function _sharesOf(address account) internal view returns (uint256) {
-        return shares[account];
-    }
-
-    function _transfer(
-        address sender,
-        address reciver,
-        uint256 amount
-    ) internal override {
-        uint256 sharesToTransfer = getSharesFromStakedAvax(amount);
-        _transferShares(sender, reciver, sharesToTransfer);
-        emit Transfer(sender, reciver, amount);
-    }
-
-    function _transferShares(
-        address sender,
-        address receiver,
-        uint256 amountShares
-    ) internal whenNotPaused {
-        require(sender != address(0), "NO TRANSFER FROM THE ZERO ADDRESS");
-        require(receiver != address(0), "NO TRANSFER TO THE ZERO ADDRESS");
-        require(sender != receiver, "NO SELF TRANSFER");
-
-        uint256 currentSenderShares = shares[sender];
-        require(
-            amountShares <= currentSenderShares,
-            "TRANSFER EXCEEDS BALANCE"
-        );
-        //keeps a tally for data bragging rights
-        if(shares[receiver] == 0){
-            stakeAccts = stakeAccts.add(1);
-        }
-
-        shares[sender] = currentSenderShares.sub(amountShares);
-        shares[receiver] = shares[receiver].add(amountShares);
-
-        if(shares[sender] == 0){
-            stakeAccts = stakeAccts.sub(1);
-        }
-    }
-
-    function _getTotalShares() internal view returns (uint256) {
-        return TOTAL_AVAX_SHARES.getStorageUint256();
-    }
-
-
-
-    function _pauseParent() internal{
-
-        _pause();
-    }
-
-
-    function _resume() internal{
-
-        _unpause();
-    }
 
     function retrieveAcctRequestesEnumerated(address acct, uint256 start, uint256 end) external view returns (withdrawRequest[] memory, uint[] memory){
         require(start < acctWithdrawRequestArray[acct].length, "INDEX OUT OF BOUNDS");
@@ -391,8 +382,7 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
     }
 
     function _getTotalAvaxPooled() internal view returns(uint256){
-        //to deploy make this actually run a caculation
-        uint256 Avax = transientAvax.getStorageUint256();
+        uint256 Avax = totalControledAvax.getStorageUint256();
         return Avax;
     }
 
@@ -409,13 +399,14 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         }
         _mintShares(sender, sharesToMint);
 
-        _submitted(sender, deposit);
+        _submitted(sender, deposit, getPooledAvaxfromShares(deposit));
         _emitTransferAfterMint(sender, sharesToMint);
 
         return sharesToMint;
     }
+
     //@dev only can withdraw when avax in contract is enough
-    function RequestWithdrawl(uint256 amountShares) internal nonReentrant whenNotPaused {
+    function _requestWithdrawl(uint256 amountShares) internal nonReentrant whenNotPaused {
         require(amountShares > 0, "CANNOT_WITHDRAW_ZERO");
         require(amountShares <= sharesOf(msg.sender), "WITHDRAW_EXCEEDS_OWNED_SHARES");
         
@@ -428,7 +419,6 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
 
         emit WithdrawRequested(msg.sender, getPooledAvaxfromShares(amountShares));
     }
-
     function _cancelWithdrawRequest(uint withdrawIndex) internal whenNotPaused {
         require(withdrawIndex < acctWithdrawRequestArray[msg.sender].length, "INDEX OUT OF RANGE");
 
@@ -553,12 +543,121 @@ contract Estake is PausableUpgradeable, ReentrancyGuardUpgradeable, AccessContro
         }
     }
 
-    function _submitted(address sender, uint256 amount) internal {
-        transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amount));
+    function _submitted(address sender, uint256 amountShares, uint256 amountAvax) internal {
+        transientAvax.setStorageUint256(transientAvax.getStorageUint256().add(amountAvax));
         _recaculateAvax();
         
+        emit Submitted(sender, amountShares, amountAvax);
+    }
+    //mints new shares and adds them to the wallet adress without a transfer event
+    //contract cannot be paused/address to mintTo cannot be the zero address
+    function _mintShares(address mintTo, uint256 amount)
+        internal
+        whenNotPaused
+        returns (uint256 newTotalShares)
+    {
+        require(mintTo != address(0), "NO MINT TO THE ZERO ADDRESS");
 
-        emit Submitted(sender, amount);
+        if(shares[mintTo] == 0){
+            stakeAccts = stakeAccts.add(1);
+        }
+        newTotalShares = getTotalShares().add(amount);
+        TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
+
+        shares[mintTo] = shares[mintTo].add(newTotalShares);
+    }
+
+    //only used when dealing with exploits/withdrawls
+    //tokens will be minted to the victims address
+    //and then burned from the perpatrators address
+    function _burnShares(address burnFrom, uint256 amount)
+        internal
+        returns (bool burnSuccessful)
+    {
+        require(burnFrom != address(0), "Will NO BURN  THE ZERO ADDRESS");
+
+        uint256 addressShares = shares[burnFrom];
+        require(amount <= addressShares, "BURN MORE THAN WALLET HOLDS");
+
+        uint256 newTotalShares = _getTotalShares().sub(amount);
+        TOTAL_AVAX_SHARES.setStorageUint256(newTotalShares);
+
+        shares[burnFrom] = addressShares.sub(amount);
+
+        if(shares[burnFrom] == 0){
+            stakeAccts = stakeAccts.sub(1);
+        }
+        return burnSuccessful = true;
+    }
+
+    function _approve(
+        address owner,
+        address spender,
+        uint256 amount
+    ) internal override whenNotPaused {
+        require(owner != address(0), "NO APPROVAL FROM ZERO ADDRESS");
+        require(spender != address(0), "NO APPROVAL FROM ZERO ADDRESS");
+
+        allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+
+    function _sharesOf(address account) internal view returns (uint256) {
+        return shares[account];
+    }
+
+    function _transfer(
+        address sender,
+        address reciver,
+        uint256 amount
+    ) internal override {
+        uint256 sharesToTransfer = getSharesFromStakedAvax(amount);
+        _transferShares(sender, reciver, sharesToTransfer);
+        emit Transfer(sender, reciver, amount);
+    }
+
+    function _transferShares(
+        address sender,
+        address receiver,
+        uint256 amountShares
+    ) internal whenNotPaused {
+        require(sender != address(0), "NO TRANSFER FROM THE ZERO ADDRESS");
+        require(receiver != address(0), "NO TRANSFER TO THE ZERO ADDRESS");
+        require(sender != receiver, "NO SELF TRANSFER");
+
+        uint256 currentSenderShares = shares[sender];
+        require(
+            amountShares <= currentSenderShares,
+            "TRANSFER EXCEEDS BALANCE"
+        );
+        //keeps a tally for data bragging rights
+        if(shares[receiver] == 0){
+            stakeAccts = stakeAccts.add(1);
+        }
+
+        shares[sender] = currentSenderShares.sub(amountShares);
+        shares[receiver] = shares[receiver].add(amountShares);
+
+        if(shares[sender] == 0){
+            stakeAccts = stakeAccts.sub(1);
+        }
+    }
+
+    function _getTotalShares() internal view returns (uint256) {
+        return TOTAL_AVAX_SHARES.getStorageUint256();
+    }
+
+
+
+    function _pauseParent() internal{
+
+        _pause();
+    }
+
+
+    function _resume() internal{
+
+        _unpause();
     }
 
     function _recaculateAvax() internal {
