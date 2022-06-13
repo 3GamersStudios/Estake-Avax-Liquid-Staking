@@ -1718,7 +1718,7 @@ contract StakedAvax is
         userSharesInCustody[msg.sender] = userSharesInCustody[msg.sender].sub(shareAmount);
 
         userUnlockRequests[msg.sender][unlockIndex] = userUnlockRequests[msg.sender][userUnlockRequests[msg.sender].length - 1];
-        userUnlockRequests[msg.sender].pop();
+        userUnlockRequsests[msg.sender].pop();
 
         _transferShares(address(this), msg.sender, shareAmount);
 
